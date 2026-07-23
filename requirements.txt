@@ -1,0 +1,7 @@
+python-telegram-bot==21.6
+httpx>=0.27,<0.29
+python-dotenv==1.0.1
+SQLAlchemy>=2.0,<2.1
+aiosqlite>=0.20          # драйвер SQLite (локальная разработка)
+asyncpg>=0.29           # драйвер PostgreSQL (прод)
+tzdata>=2024.1          # база таймзон (нужна на Windows/из контейнера)

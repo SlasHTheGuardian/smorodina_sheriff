@@ -1,0 +1,8 @@
+.agents/
+.claude/
+.idea/
+.venv/
+__pycache__/
+sheriff.db
+db_schema.sql
+tests/
