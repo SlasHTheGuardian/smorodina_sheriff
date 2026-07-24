@@ -4,5 +4,15 @@
 .venv/
 __pycache__/
 sheriff.db
-db_schema.sql
 tests/
+.env
+.env.*
+!.env.example
+*.py[cod]
+*.db
+.pytest_cache/
+DEPLOY_DOCKER.md
+docker/
+db_schema.sql
+.env.example
+.gitattributes
