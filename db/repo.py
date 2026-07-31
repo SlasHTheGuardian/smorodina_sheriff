@@ -78,10 +78,12 @@ async def create_game(
     session: AsyncSession, starts_at: datetime, capacity: int,
     location: str | None, note: str | None, host_id: int | None,
     title: str = "Игровой вечер",
+    price_rubles: int = 500,
 ) -> Game:
     game = Game(
         starts_at=starts_at,
         capacity=capacity,
+        price_rubles=price_rubles,
         location=location,
         note=note,
         host_id=host_id,

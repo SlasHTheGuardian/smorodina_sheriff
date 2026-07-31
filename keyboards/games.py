@@ -7,21 +7,38 @@ from constants import (
 )
 from db.models import Game, Registration, GAME_OPEN, REG_ACTIVE, REG_WAITLIST
 from db.repo import registration_is_open
+from event_price import format_event_price
 from gametime import fmt
 
 GAMES_GREETING = "📅 <b>Запись на игры</b>"
-PAYMENT_PROMPT = (
-    "Для участия в игровом вечере необходимо скинуть 500 рублей "
-    "по номеру +79175361453 (Яндекс Банк)"
-)
-CANCEL_PROMPT = (
-    "Внимание, Смородинка!\n\n"
-    "При отмене записи на игру, ваше место будет освобождено для других "
-    "участников, вы не сможете посетить игровой вечер, а деньги будут "
-    "возвращены только при отмене записи не позже, чем за три дня до "
-    "мероприятия\n\n"
-    "Точно отменяем?"
-)
+
+
+def payment_prompt(price_rubles: int) -> str:
+    return (
+        "Для участия в игровом вечере необходимо перевести "
+        f"{format_event_price(price_rubles)} "
+        "по номеру +79175361453 (Яндекс Банк)."
+    )
+
+
+def cancel_prompt(price_rubles: int) -> str:
+    common = (
+        "Внимание, Смородинка!\n\n"
+        "При отмене записи ваше место будет освобождено для других "
+        "участников, и вы не сможете посетить игровой вечер."
+    )
+    if price_rubles == 0:
+        return common + "\n\nТочно отменяем?"
+    return (
+        common
+        + " Деньги будут возвращены только при отмене записи не позже, "
+        "чем за три дня до мероприятия.\n\nТочно отменяем?"
+    )
+
+
+# Оставлены для совместимости с существующими импортами.
+PAYMENT_PROMPT = payment_prompt(500)
+CANCEL_PROMPT = cancel_prompt(500)
 
 
 def _compact_title(title: str, limit: int = 28) -> str:

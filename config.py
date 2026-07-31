@@ -21,7 +21,7 @@ DATABASE_URL: str = os.environ.get(
 # HTTP API рейтингов работает на той же машине, что и бот. Адрес можно
 # переопределить, если сервис запущен на другом порту или с префиксом пути.
 RATINGS_API_BASE_URL: str = os.environ.get(
-    "RATINGS_API_BASE_URL", "http://127.0.0.1:8080"
+    "RATINGS_API_BASE_URL", "http://167.17.180.63:4000"
 ).rstrip("/")
 try:
     RATINGS_API_TIMEOUT: float = float(

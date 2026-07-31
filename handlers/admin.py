@@ -27,12 +27,15 @@ from constants import (
     CB_ADMIN_EVENT_EDIT_FIELD_PREFIX,
     CB_ADMIN_EVENT_EDIT_PREFIX,
     CB_ADMIN_EVENT_VIEW_PREFIX,
+    CB_ADMIN_EVENT_CUSTOM_PRICE,
+    CB_ADMIN_EVENT_PRICE_PREFIX,
     CB_ADMIN_EVENT_SKIP_LOCATION,
     CB_ADMIN_EVENT_SKIP_NOTE,
 )
 from db.engine import Session
 from db import repo
 from db.models import GAME_CLOSED, GAME_CANCELLED
+from event_price import format_event_price, parse_event_price
 from gametime import as_utc, parse_local, fmt
 from handlers.games import game_card_payload
 from keyboards.admin import (
@@ -46,6 +49,7 @@ from keyboards.admin import (
     event_edit_input_keyboard,
     event_location_keyboard,
     event_note_keyboard,
+    event_price_keyboard,
 )
 from keyboards.menu import GREETING, main_menu_keyboard
 
@@ -54,22 +58,25 @@ from keyboards.menu import GREETING, main_menu_keyboard
     EVENT_TITLE,
     EVENT_DATETIME,
     EVENT_CAPACITY,
+    EVENT_PRICE,
     EVENT_LOCATION,
     EVENT_NOTE,
     EVENT_CONFIRM,
-) = range(6)
+) = range(7)
 
 EVENT_EDIT_MENU, EVENT_EDIT_VALUE = range(2)
 
 _EVENT_TITLE = "admin_event_title"
 _EVENT_STARTS_AT = "admin_event_starts_at"
 _EVENT_CAPACITY = "admin_event_capacity"
+_EVENT_PRICE = "admin_event_price"
 _EVENT_LOCATION = "admin_event_location"
 _EVENT_NOTE = "admin_event_note"
 _EVENT_KEYS = (
     _EVENT_TITLE,
     _EVENT_STARTS_AT,
     _EVENT_CAPACITY,
+    _EVENT_PRICE,
     _EVENT_LOCATION,
     _EVENT_NOTE,
 )
@@ -124,6 +131,7 @@ def _confirmation_text(context: ContextTypes.DEFAULT_TYPE) -> str:
     title = escape(context.user_data[_EVENT_TITLE])
     starts_at = context.user_data[_EVENT_STARTS_AT]
     capacity = context.user_data[_EVENT_CAPACITY]
+    price = context.user_data[_EVENT_PRICE]
     location = context.user_data.get(_EVENT_LOCATION)
     note = context.user_data.get(_EVENT_NOTE)
     lines = [
@@ -132,6 +140,7 @@ def _confirmation_text(context: ContextTypes.DEFAULT_TYPE) -> str:
         f"🎲 <b>{title}</b>",
         f"📅 {fmt(starts_at)}",
         f"👥 Мест: <b>{capacity}</b>",
+        f"💳 Стоимость: <b>{format_event_price(price)}</b>",
         f"📍 {escape(location) if location else 'не указано'}",
     ]
     if note:
@@ -222,6 +231,67 @@ async def on_event_capacity(
         )
         return EVENT_CAPACITY
     context.user_data[_EVENT_CAPACITY] = int(raw)
+    await update.message.reply_text(
+        "Сколько стоит участие?\n\n"
+        "Выберите стандартную стоимость или укажите свою.",
+        reply_markup=event_price_keyboard(),
+    )
+    return EVENT_PRICE
+
+
+async def on_event_price_choice(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    raw = query.data[len(CB_ADMIN_EVENT_PRICE_PREFIX):]
+    if raw not in {"0", "500", "700", "1000"}:
+        await query.edit_message_text(
+            "Не удалось определить стоимость. Выберите вариант ещё раз.",
+            reply_markup=event_price_keyboard(),
+        )
+        return EVENT_PRICE
+    context.user_data[_EVENT_PRICE] = int(raw)
+    await query.edit_message_text(
+        "Где пройдёт встреча?\n\n"
+        "Отправьте место проведения или нажмите «Не указывать».",
+        reply_markup=event_location_keyboard(),
+    )
+    return EVENT_LOCATION
+
+
+async def on_custom_event_price(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "Введите свою стоимость целым числом в рублях.\n\n"
+        "Для бесплатного посещения можно ввести <code>0</code>.",
+        parse_mode="HTML",
+        reply_markup=event_creation_cancel_keyboard(),
+    )
+    return EVENT_PRICE
+
+
+async def on_event_price(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    try:
+        price = parse_event_price(update.message.text)
+    except ValueError:
+        await update.message.reply_text(
+            "Введите целое число от 0 до 1 000 000 рублей.",
+            reply_markup=event_price_keyboard(),
+        )
+        return EVENT_PRICE
+    context.user_data[_EVENT_PRICE] = price
     await update.message.reply_text(
         "Где пройдёт встреча?\n\n"
         "Отправьте место проведения или нажмите «Не указывать».",
@@ -329,6 +399,7 @@ async def on_confirm_event(
             session,
             starts_at=context.user_data[_EVENT_STARTS_AT],
             capacity=context.user_data[_EVENT_CAPACITY],
+            price_rubles=context.user_data[_EVENT_PRICE],
             location=context.user_data[_EVENT_LOCATION],
             note=context.user_data[_EVENT_NOTE],
             host_id=host.id,
@@ -431,6 +502,7 @@ def _event_edit_text(event) -> str:
         f"🎲 {escape(event.title)}\n"
         f"📅 {fmt(event.starts_at)}\n"
         f"👥 Мест: {capacity}\n"
+        f"💳 Стоимость: {format_event_price(event.price_rubles)}\n"
         f"📍 {location}\n"
         f"📝 {note}\n\n"
         "Что изменить?"
@@ -478,6 +550,9 @@ async def on_edit_event_field(
             "<code>25.07.2026 19:00</code>."
         ),
         "capacity": "Введите новое количество мест от 1 до 100.",
+        "price_rubles": (
+            "Выберите новую стоимость или укажите свою."
+        ),
         "location": "Введите новое место проведения.",
         "note": "Введите новое описание встречи.",
     }
@@ -485,12 +560,78 @@ async def on_edit_event_field(
         await query.edit_message_text("Не удалось открыть редактор.")
         return ConversationHandler.END
     context.user_data[_EDIT_FIELD] = field
+    if field == "price_rubles":
+        await query.edit_message_text(
+            prompts[field],
+            reply_markup=event_price_keyboard(
+                cancel_callback=f"{CB_ADMIN_EVENT_EDIT_PREFIX}{event_id}"
+            ),
+        )
+        return EVENT_EDIT_VALUE
     await query.edit_message_text(
         prompts[field],
         parse_mode="HTML",
         reply_markup=event_edit_input_keyboard(
             event_id, can_clear=field in ("location", "note")
         ),
+    )
+    return EVENT_EDIT_VALUE
+
+
+async def on_edit_event_price_choice(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    event_id = context.user_data.get(_EDIT_EVENT_ID)
+    field = context.user_data.get(_EDIT_FIELD)
+    raw = query.data[len(CB_ADMIN_EVENT_PRICE_PREFIX):]
+    if (
+        event_id is None
+        or field != "price_rubles"
+        or raw not in {"0", "500", "700", "1000"}
+    ):
+        await query.edit_message_text("Не удалось изменить стоимость.")
+        return ConversationHandler.END
+
+    async with Session() as session:
+        event = await repo.get_game(session, event_id)
+        if event is None:
+            await query.edit_message_text("Встреча не найдена.")
+            return ConversationHandler.END
+        event.price_rubles = int(raw)
+        await session.commit()
+
+    context.user_data.pop(_EDIT_FIELD, None)
+    await query.edit_message_text(
+        "✅ Изменения сохранены.\n\n" + _event_edit_text(event),
+        parse_mode="HTML",
+        reply_markup=event_edit_fields_keyboard(event.id),
+    )
+    return EVENT_EDIT_MENU
+
+
+async def on_edit_custom_event_price(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    event_id = context.user_data.get(_EDIT_EVENT_ID)
+    if (
+        event_id is None
+        or context.user_data.get(_EDIT_FIELD) != "price_rubles"
+    ):
+        await query.edit_message_text("Не удалось изменить стоимость.")
+        return ConversationHandler.END
+    await query.edit_message_text(
+        "Введите новую стоимость целым числом в рублях.\n\n"
+        "Для бесплатного посещения можно ввести <code>0</code>.",
+        parse_mode="HTML",
+        reply_markup=event_edit_input_keyboard(event_id),
     )
     return EVENT_EDIT_VALUE
 
@@ -558,6 +699,19 @@ async def on_edit_event_value(
                 )
                 return EVENT_EDIT_VALUE
             event.capacity = capacity
+        elif field == "price_rubles":
+            try:
+                event.price_rubles = parse_event_price(raw)
+            except ValueError:
+                await update.message.reply_text(
+                    "Введите целое число от 0 до 1 000 000 рублей.",
+                    reply_markup=event_price_keyboard(
+                        cancel_callback=(
+                            f"{CB_ADMIN_EVENT_EDIT_PREFIX}{event_id}"
+                        )
+                    ),
+                )
+                return EVENT_EDIT_VALUE
         elif field == "location":
             if not 2 <= len(raw) <= 200:
                 await update.message.reply_text(
@@ -882,6 +1036,20 @@ def register(app) -> None:
                     on_event_capacity,
                 ),
             ],
+            EVENT_PRICE: [
+                CallbackQueryHandler(
+                    on_event_price_choice,
+                    pattern=f"^{CB_ADMIN_EVENT_PRICE_PREFIX}",
+                ),
+                CallbackQueryHandler(
+                    on_custom_event_price,
+                    pattern=f"^{CB_ADMIN_EVENT_CUSTOM_PRICE}$",
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    on_event_price,
+                ),
+            ],
             EVENT_LOCATION: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
@@ -936,6 +1104,14 @@ def register(app) -> None:
                 ),
             ],
             EVENT_EDIT_VALUE: [
+                CallbackQueryHandler(
+                    on_edit_event_price_choice,
+                    pattern=f"^{CB_ADMIN_EVENT_PRICE_PREFIX}",
+                ),
+                CallbackQueryHandler(
+                    on_edit_custom_event_price,
+                    pattern=f"^{CB_ADMIN_EVENT_CUSTOM_PRICE}$",
+                ),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     on_edit_event_value,

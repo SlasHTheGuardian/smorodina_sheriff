@@ -154,6 +154,10 @@ class Game(Base):
             "status IN ('planned','open','closed','finished','cancelled')",
             name="ck_events_status",
         ),
+        CheckConstraint(
+            "price_rubles >= 0",
+            name="ck_events_price_rubles",
+        ),
         Index("idx_events_host", "host_id"),
         Index("idx_events_season", "season_id"),
     )
@@ -174,6 +178,9 @@ class Game(Base):
     )
     location: Mapped[str | None] = mapped_column(Text)
     capacity: Mapped[int | None] = mapped_column("max_players", Integer)
+    price_rubles: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=500, server_default="500"
+    )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=GAME_OPEN, index=True
     )

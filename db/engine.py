@@ -59,13 +59,25 @@ def _ensure_indexes(sync_conn) -> None:
 
 def _add_compatible_columns(sync_conn) -> None:
     inspector = inspect(sync_conn)
-    if "users" not in inspector.get_table_names():
-        return
-    columns = {column["name"] for column in inspector.get_columns("users")}
-    if "game_nickname" not in columns:
-        sync_conn.execute(text(
-            "ALTER TABLE users ADD COLUMN game_nickname TEXT"
-        ))
+    tables = set(inspector.get_table_names())
+    if "users" in tables:
+        columns = {
+            column["name"] for column in inspector.get_columns("users")
+        }
+        if "game_nickname" not in columns:
+            sync_conn.execute(text(
+                "ALTER TABLE users ADD COLUMN game_nickname TEXT"
+            ))
+
+    if "events" in tables:
+        columns = {
+            column["name"] for column in inspector.get_columns("events")
+        }
+        if "price_rubles" not in columns:
+            sync_conn.execute(text(
+                "ALTER TABLE events ADD COLUMN price_rubles "
+                "INTEGER NOT NULL DEFAULT 500"
+            ))
 
 
 def _seed_roles(sync_conn) -> None:

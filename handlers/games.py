@@ -10,12 +10,13 @@ from constants import (
 )
 from keyboards.games import (
     GAMES_GREETING, games_list_keyboard, game_card_keyboard, my_games_keyboard,
-    PAYMENT_PROMPT, payment_keyboard,
-    CANCEL_PROMPT, cancel_confirmation_keyboard,
+    payment_prompt, payment_keyboard,
+    cancel_prompt, cancel_confirmation_keyboard,
 )
 from db.engine import Session
 from db import repo
 from db.models import GAME_OPEN, REG_ACTIVE, REG_WAITLIST
+from event_price import format_event_price
 from gametime import fmt
 
 
@@ -43,6 +44,7 @@ async def game_card_payload(
     lines = [
         f"🎲 <b>{escape(game.title)}</b>",
         f"📅 {fmt(game.starts_at)}",
+        f"💳 Стоимость: <b>{format_event_price(game.price_rubles)}</b>",
     ]
     if game.location:
         lines.append(f"📍 {escape(game.location)}")
@@ -183,10 +185,26 @@ async def on_register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             text, kb = await game_card_payload(session, game, player)
             await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
             return
+        if game.price_rubles == 0:
+            code, status = await repo.register(session, game, player)
+            toast = (
+                "Готово, вы записаны!"
+                if status == REG_ACTIVE
+                else "Мест нет — вы в листе ожидания."
+            )
+            if code not in ("registered", "waitlist"):
+                toast = "Не удалось записаться на эту встречу."
+            await query.answer(toast, show_alert=False)
+            text, kb = await game_card_payload(session, game, player)
+            await query.edit_message_text(
+                text, parse_mode="HTML", reply_markup=kb
+            )
+            return
+        price_rubles = game.price_rubles
 
     await query.answer()
     await query.edit_message_text(
-        PAYMENT_PROMPT,
+        payment_prompt(price_rubles),
         reply_markup=payment_keyboard(game_id),
     )
 
@@ -240,7 +258,7 @@ async def on_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await query.answer()
     await query.edit_message_text(
-        CANCEL_PROMPT,
+        cancel_prompt(game.price_rubles),
         reply_markup=cancel_confirmation_keyboard(game_id),
     )
 

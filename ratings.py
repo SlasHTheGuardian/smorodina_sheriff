@@ -13,17 +13,23 @@ class RatingsServiceError(Exception):
 
 
 @dataclass(frozen=True)
-class SeasonRating:
+class SeasonStats:
     season_id: int
     season_name: str
     rating: int | float
+    games_played: int
+    wins: int
+    losses: int
+    win_rate: int | float
 
 
 @dataclass(frozen=True)
 class PlayerRating:
-    global_rating: int | float
-    current_season: int | float
-    seasons: tuple[SeasonRating, ...]
+    player_id: int
+    name: str
+    global_stats: SeasonStats
+    current_season_stats: SeasonStats | None
+    seasons_ratings: tuple[SeasonStats, ...]
 
 
 def _number(value: object, field: str) -> int | float:
@@ -34,36 +40,78 @@ def _number(value: object, field: str) -> int | float:
     return value
 
 
+def _integer(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RatingsServiceError(
+            f"Некорректное целочисленное поле: {field}"
+        )
+    return value
+
+
+def _text(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RatingsServiceError(
+            f"Некорректное текстовое поле: {field}"
+        )
+    return value.strip()
+
+
+def _parse_season_stats(payload: object, field: str) -> SeasonStats:
+    if not isinstance(payload, dict):
+        raise RatingsServiceError(f"Некорректные данные: {field}")
+
+    win_rate = _number(payload.get("winRate"), f"{field}.winRate")
+    if not 0 <= win_rate <= 1:
+        raise RatingsServiceError(
+            f"Некорректное поле доли побед: {field}.winRate"
+        )
+
+    stats = SeasonStats(
+        season_id=_integer(payload.get("seasonId"), f"{field}.seasonId"),
+        season_name=_text(
+            payload.get("seasonName"), f"{field}.seasonName"
+        ),
+        rating=_number(payload.get("rating"), f"{field}.rating"),
+        games_played=_integer(
+            payload.get("gamesPlayed"), f"{field}.gamesPlayed"
+        ),
+        wins=_integer(payload.get("wins"), f"{field}.wins"),
+        losses=_integer(payload.get("losses"), f"{field}.losses"),
+        win_rate=win_rate,
+    )
+    if min(stats.games_played, stats.wins, stats.losses) < 0:
+        raise RatingsServiceError(
+            f"Отрицательная статистика: {field}"
+        )
+    return stats
+
+
 def parse_player_rating(payload: object) -> PlayerRating:
     if not isinstance(payload, dict):
         raise RatingsServiceError("Некорректный ответ рейтингового сервиса")
 
-    seasons_payload = payload.get("seasons")
+    seasons_payload = payload.get("seasonsRatings")
     if not isinstance(seasons_payload, list):
         raise RatingsServiceError("Некорректный список сезонов")
 
-    seasons: list[SeasonRating] = []
-    for item in seasons_payload:
-        if not isinstance(item, dict):
-            raise RatingsServiceError("Некорректные данные сезона")
-        season_id = item.get("seasonId")
-        season_name = item.get("seasonName")
-        if isinstance(season_id, bool) or not isinstance(season_id, int):
-            raise RatingsServiceError("Некорректный идентификатор сезона")
-        if not isinstance(season_name, str) or not season_name.strip():
-            raise RatingsServiceError("Некорректное название сезона")
-        seasons.append(SeasonRating(
-            season_id=season_id,
-            season_name=season_name.strip(),
-            rating=_number(item.get("rating"), "seasons.rating"),
-        ))
+    current_payload = payload.get("currentSeasonStats")
+    current_stats = (
+        None
+        if current_payload is None
+        else _parse_season_stats(current_payload, "currentSeasonStats")
+    )
 
     return PlayerRating(
-        global_rating=_number(payload.get("global"), "global"),
-        current_season=_number(
-            payload.get("currentSeason"), "currentSeason"
+        player_id=_integer(payload.get("playerId"), "playerId"),
+        name=_text(payload.get("name"), "name"),
+        global_stats=_parse_season_stats(
+            payload.get("globalStats"), "globalStats"
         ),
-        seasons=tuple(seasons),
+        current_season_stats=current_stats,
+        seasons_ratings=tuple(
+            _parse_season_stats(item, f"seasonsRatings[{index}]")
+            for index, item in enumerate(seasons_payload)
+        ),
     )
 
 
@@ -72,7 +120,7 @@ async def fetch_player_rating(
     client: httpx.AsyncClient | None = None,
 ) -> PlayerRating | None:
     encoded_name = quote(player_name, safe="")
-    url = f"{RATINGS_API_BASE_URL}/ratings/{encoded_name}"
+    url = f"{RATINGS_API_BASE_URL}/players/name/{encoded_name}"
     owns_client = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=RATINGS_API_TIMEOUT)

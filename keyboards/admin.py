@@ -10,6 +10,8 @@ from constants import (
     CB_ADMIN_EVENT_VIEW_PREFIX,
     CB_ADMIN_EVENT_CANCEL,
     CB_ADMIN_EVENT_CONFIRM,
+    CB_ADMIN_EVENT_CUSTOM_PRICE,
+    CB_ADMIN_EVENT_PRICE_PREFIX,
     CB_ADMIN_EVENT_SKIP_LOCATION,
     CB_ADMIN_EVENT_SKIP_NOTE,
     CB_GAME_PREFIX,
@@ -73,6 +75,12 @@ def event_edit_fields_keyboard(event_id: int) -> InlineKeyboardMarkup:
                     f"{CB_ADMIN_EVENT_EDIT_FIELD_PREFIX}capacity"
                 ),
             ),
+            InlineKeyboardButton(
+                "Стоимость",
+                callback_data=(
+                    f"{CB_ADMIN_EVENT_EDIT_FIELD_PREFIX}price_rubles"
+                ),
+            ),
         ],
         [
             InlineKeyboardButton(
@@ -131,6 +139,41 @@ def event_creation_cancel_keyboard() -> InlineKeyboardMarkup:
             "Отмена", callback_data=CB_ADMIN_EVENT_CANCEL
         ),
     ]])
+
+
+def event_price_keyboard(
+    cancel_callback: str = CB_ADMIN_EVENT_CANCEL,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "500 ₽",
+                callback_data=f"{CB_ADMIN_EVENT_PRICE_PREFIX}500",
+            ),
+            InlineKeyboardButton(
+                "700 ₽",
+                callback_data=f"{CB_ADMIN_EVENT_PRICE_PREFIX}700",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "1000 ₽",
+                callback_data=f"{CB_ADMIN_EVENT_PRICE_PREFIX}1000",
+            ),
+            InlineKeyboardButton(
+                "Бесплатно",
+                callback_data=f"{CB_ADMIN_EVENT_PRICE_PREFIX}0",
+            ),
+        ],
+        [InlineKeyboardButton(
+            "Своя стоимость",
+            callback_data=CB_ADMIN_EVENT_CUSTOM_PRICE,
+        )],
+        [InlineKeyboardButton(
+            "Отмена",
+            callback_data=cancel_callback,
+        )],
+    ])
 
 
 def event_location_keyboard() -> InlineKeyboardMarkup:

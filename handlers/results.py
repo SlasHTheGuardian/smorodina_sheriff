@@ -25,6 +25,7 @@ from constants import (
 from db import repo
 from db.engine import Session
 from db.models import Player
+from event_price import format_event_price
 from gametime import fmt
 from keyboards.results import (
     CB_RESULT_ADD_PREFIX,
@@ -61,7 +62,12 @@ from keyboards.results import (
     table_seats_keyboard,
     winner_keyboard,
 )
-from ratings import RatingsServiceError, fetch_player_rating
+from ratings import (
+    PlayerRating,
+    RatingsServiceError,
+    SeasonStats,
+    fetch_player_rating,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -151,6 +157,7 @@ async def on_event(
     lines = [
         f"🎲 <b>{escape(event.title)}</b>",
         f"📅 {fmt(event.starts_at)}",
+        f"💳 Стоимость: <b>{format_event_price(event.price_rubles)}</b>",
     ]
     if event.location:
         lines.append(f"📍 {escape(event.location)}")
@@ -709,6 +716,42 @@ def _format_rating(value: int | float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
+def _format_win_rate(value: int | float) -> str:
+    return _format_rating(value * 100).replace(".", ",") + "%"
+
+
+def _stats_block(stats: SeasonStats, title: str) -> str:
+    return (
+        f"<b>{title}</b>\n\n"
+        f"<b>Рейтинг: {_format_rating(stats.rating)}</b>\n"
+        f" 🎭 Игры: {stats.games_played}\n"
+        f" ✅ Победы: {stats.wins}\n"
+        f" ❌ Поражения: {stats.losses}\n"
+        f"<b>Винрейт</b>: {_format_win_rate(stats.win_rate)}"
+    )
+
+
+def _format_player_rating(rating: PlayerRating) -> str:
+    lines = [
+        "🏆 <b>Мой рейтинг</b>\n",
+        f"Игровой ник: <b>{escape(rating.name)}</b>",
+        "",
+        _stats_block(rating.global_stats, "Общий рейтинг"),
+        "",
+    ]
+    if rating.current_season_stats is None:
+        lines.extend([
+            "<b>Сезонный рейтинг</b>",
+            "Пока нет сыгранных игр.",
+        ])
+    else:
+        lines.append(_stats_block(
+            rating.current_season_stats,
+            "Сезонный рейтинг",
+        ))
+    return "\n".join(lines)
+
+
 def _stats_payload(player: Player) -> tuple[str, bool]:
     nickname = (player.game_nickname or "").strip()
     if not nickname:
@@ -748,19 +791,7 @@ async def _rating_payload(player: Player) -> str:
     if rating is None:
         return header + "\nРейтинг для этого игрового ника пока не найден."
 
-    lines = [
-        header.rstrip(),
-        f"Глобальный рейтинг: <b>{_format_rating(rating.global_rating)}</b>",
-        f"Текущий сезон: <b>{_format_rating(rating.current_season)}</b>",
-    ]
-    if rating.seasons:
-        lines.extend(["", "<b>Рейтинг по сезонам:</b>"])
-        lines.extend(
-            f"• {escape(season.season_name)}: "
-            f"<b>{_format_rating(season.rating)}</b>"
-            for season in rating.seasons
-        )
-    return "\n".join(lines)
+    return _format_player_rating(rating)
 
 
 async def _get_current_player(update: Update) -> Player:
