@@ -281,10 +281,15 @@ def stats_keyboard(has_nickname: bool) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(
             "Мой рейтинг", callback_data=CB_MY_RATING
         )])
-    rows.extend([
-        [InlineKeyboardButton("Мои игры", callback_data=CB_MY_RESULTS)],
-        [InlineKeyboardButton("Назад", callback_data=CB_MAIN)],
-    ])
+    rows.append([InlineKeyboardButton(
+        "Мои игры", callback_data=CB_MY_RESULTS
+    )])
+    if has_nickname:
+        rows.append([InlineKeyboardButton(
+            "Изменить игровой ник",
+            callback_data=CB_CREATE_GAME_NICKNAME,
+        )])
+    rows.append([InlineKeyboardButton("Назад", callback_data=CB_MAIN)])
     return InlineKeyboardMarkup(rows)
 
 

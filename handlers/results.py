@@ -847,8 +847,14 @@ async def on_create_game_nickname(
 ) -> int:
     query = update.callback_query
     await query.answer()
+    player = await _get_current_player(update)
+    prompt = (
+        "Введите новый игровой ник сообщением."
+        if (player.game_nickname or "").strip()
+        else "Введите игровой ник сообщением."
+    )
     await query.edit_message_text(
-        "Введите игровой ник сообщением.\n\n"
+        prompt + "\n\n"
         "Он будет использоваться для поиска вашего рейтинга.",
         reply_markup=nickname_input_keyboard(),
     )
@@ -1040,6 +1046,10 @@ def register(app: Application) -> None:
     stats_conversation = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(on_stats, pattern=f"^{CB_STATS}$"),
+            CallbackQueryHandler(
+                on_create_game_nickname,
+                pattern=f"^{CB_CREATE_GAME_NICKNAME}$",
+            ),
         ],
         states={
             STATS_VIEW: [
