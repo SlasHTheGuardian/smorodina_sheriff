@@ -58,7 +58,7 @@ async def game_card_payload(
     elif not repo.registration_is_open(game):
         lines.append(
             "👁 <i>Только просмотр. Запись закрывается "
-            "за 3 суток до начала.</i>"
+            "за 2 суток до начала.</i>"
         )
         lines.append("")
     capacity = game.capacity if game.capacity is not None else "∞"
@@ -179,7 +179,7 @@ async def on_register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if not repo.registration_is_open(game):
             await query.answer(
-                "Запись закрывается за 3 суток до начала.",
+                "Запись закрывается за 2 суток до начала.",
                 show_alert=False,
             )
             text, kb = await game_card_payload(session, game, player)
@@ -226,7 +226,7 @@ async def on_payment_confirm(
         code, status = await repo.register(session, game, player)
         toast = {
             "closed":  "Запись на эту игру закрыта.",
-            "deadline": "Запись закрывается за 3 суток до начала.",
+            "deadline": "Запись закрывается за 2 суток до начала.",
             "already": "Вы уже записаны.",
         }.get(code) or (
             "Готово, вы записаны!" if status == REG_ACTIVE

@@ -30,6 +30,8 @@ from gametime import fmt
 from keyboards.results import (
     CB_RESULT_ADD_PREFIX,
     CB_RESULT_CANCEL_INPUT,
+    CB_RESULT_EVENT_DELETE_CONFIRM_PREFIX,
+    CB_RESULT_EVENT_DELETE_PREFIX,
     CB_RESULT_EVENT_PREFIX,
     CB_RESULT_GAME_PREFIX,
     CB_RESULT_GAME_ADD_PREFIX,
@@ -48,6 +50,7 @@ from keyboards.results import (
     ROLE_EMOJIS,
     ROLE_LABELS,
     cancel_input_keyboard,
+    confirm_delete_event_keyboard,
     confirm_delete_game_keyboard,
     event_result_keyboard,
     game_management_keyboard,
@@ -193,6 +196,75 @@ async def on_add_results(
         reply_markup=cancel_input_keyboard(),
     )
     return WAIT_GAME_COUNT
+
+
+async def on_delete_event_request(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    event_id = int(
+        query.data[len(CB_RESULT_EVENT_DELETE_PREFIX):]
+    )
+
+    async with Session() as session:
+        event = await repo.get_game(session, event_id)
+        if event is None:
+            events = await repo.list_recent_events(session)
+            await query.edit_message_text(
+                "Встреча уже удалена.",
+                reply_markup=recent_events_keyboard(events),
+            )
+            return EVENTS
+        participants = await repo.list_event_participants(session, event_id)
+        played_games = await repo.list_event_played_games(session, event_id)
+
+    await query.edit_message_text(
+        f"Удалить встречу <b>{escape(event.title)}</b> "
+        f"({fmt(event.starts_at)})?\n\n"
+        f"Участников: <b>{len(participants)}</b>, "
+        f"игр: <b>{len(played_games)}</b>.\n\n"
+        "Будут удалены встреча, все регистрации и внесённые результаты.",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_event_keyboard(event.id),
+    )
+    return EVENT_DETAIL
+
+
+async def on_delete_event_confirm(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    event_id = int(
+        query.data[len(CB_RESULT_EVENT_DELETE_CONFIRM_PREFIX):]
+    )
+
+    async with Session() as session:
+        event = await repo.get_game(session, event_id)
+        if event is None:
+            events = await repo.list_recent_events(session)
+            await query.edit_message_text(
+                "Встреча уже удалена.",
+                reply_markup=recent_events_keyboard(events),
+            )
+            return EVENTS
+        event_title = event.title
+        await repo.delete_event(session, event_id)
+        events = await repo.list_recent_events(session)
+
+    context.user_data.pop(_EVENT_ID, None)
+    context.user_data.pop(_GAME_ID, None)
+    await query.edit_message_text(
+        f"✅ Встреча <b>{escape(event_title)}</b> удалена.",
+        parse_mode="HTML",
+        reply_markup=recent_events_keyboard(events),
+    )
+    return EVENTS
 
 
 async def on_game_count(
@@ -959,10 +1031,21 @@ def register(app: Application) -> None:
             ],
             EVENT_DETAIL: [
                 CallbackQueryHandler(
+                    on_delete_event_confirm,
+                    pattern=f"^{CB_RESULT_EVENT_DELETE_CONFIRM_PREFIX}",
+                ),
+                CallbackQueryHandler(
+                    on_delete_event_request,
+                    pattern=f"^{CB_RESULT_EVENT_DELETE_PREFIX}",
+                ),
+                CallbackQueryHandler(
                     on_add_results, pattern=f"^{CB_RESULT_ADD_PREFIX}"
                 ),
                 CallbackQueryHandler(
                     on_games, pattern=f"^{CB_RESULT_GAMES_PREFIX}"
+                ),
+                CallbackQueryHandler(
+                    on_event, pattern=f"^{CB_RESULT_EVENT_PREFIX}"
                 ),
                 CallbackQueryHandler(
                     on_admin_results, pattern=f"^{CB_ADMIN_RESULTS}$"

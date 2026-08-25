@@ -20,7 +20,7 @@ from db.models import (
     REG_ACTIVE, REG_WAITLIST, REG_CANCELLED, REG_ATTENDED,
 )
 
-REGISTRATION_CLOSE_BEFORE = timedelta(days=3)
+REGISTRATION_CLOSE_BEFORE = timedelta(days=2)
 
 
 def _utcnow() -> datetime:
@@ -212,7 +212,7 @@ async def register(
     """
     Возвращает (code, status):
       ('closed',     None)            — игра закрыта/отменена;
-      ('deadline',   None)            — до начала осталось не более 3 суток;
+      ('deadline',   None)            — до начала осталось не более 2 суток;
       ('already',    REG_ACTIVE|REG_WAITLIST) — уже записан;
       ('registered', REG_ACTIVE|REG_WAITLIST) — записали (или в лист ожидания).
     """

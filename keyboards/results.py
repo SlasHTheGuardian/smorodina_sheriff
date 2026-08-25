@@ -22,6 +22,8 @@ CB_RESULT_GAME_PREFIX = "res_game:"
 CB_RESULT_GAME_ADD_PREFIX = "res_game_add:"
 CB_RESULT_GAME_DELETE_PREFIX = "res_game_delete:"
 CB_RESULT_GAME_DELETE_CONFIRM_PREFIX = "res_game_delete_ok:"
+CB_RESULT_EVENT_DELETE_PREFIX = "res_event_delete:"
+CB_RESULT_EVENT_DELETE_CONFIRM_PREFIX = "res_event_delete_ok:"
 CB_RESULT_PLAYER_PREFIX = "res_player:"
 CB_RESULT_ROLE_PREFIX = "res_role:"
 CB_RESULT_WINNER_PREFIX = "res_win:"
@@ -75,7 +77,25 @@ def event_result_keyboard(
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(action, callback_data=action_cb)],
         [InlineKeyboardButton(
+            "Удалить встречу",
+            callback_data=f"{CB_RESULT_EVENT_DELETE_PREFIX}{event_id}",
+        )],
+        [InlineKeyboardButton(
             "Назад", callback_data=CB_ADMIN_RESULTS
+        )],
+    ])
+
+
+def confirm_delete_event_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "Удалить встречу",
+            callback_data=(
+                f"{CB_RESULT_EVENT_DELETE_CONFIRM_PREFIX}{event_id}"
+            ),
+        )],
+        [InlineKeyboardButton(
+            "Отмена", callback_data=f"{CB_RESULT_EVENT_PREFIX}{event_id}"
         )],
     ])
 
