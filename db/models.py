@@ -27,6 +27,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from event_types import EVENT_TYPE_MAFIA
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -158,6 +160,10 @@ class Game(Base):
             "price_rubles >= 0",
             name="ck_events_price_rubles",
         ),
+        CheckConstraint(
+            "event_type IN ('mafia','board_games','online_meeting','meetup')",
+            name="ck_events_event_type",
+        ),
         Index("idx_events_host", "host_id"),
         Index("idx_events_season", "season_id"),
     )
@@ -171,6 +177,10 @@ class Game(Base):
     )
     title: Mapped[str] = mapped_column(
         Text, nullable=False, default="Игровой вечер"
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        default=EVENT_TYPE_MAFIA, server_default=EVENT_TYPE_MAFIA,
     )
     note: Mapped[str | None] = mapped_column("description", Text)
     starts_at: Mapped[datetime] = mapped_column(

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from functools import wraps
 from html import escape
+import logging
 
 from telegram import Update
 from telegram.ext import (
@@ -29,6 +30,7 @@ from constants import (
     CB_ADMIN_EVENT_VIEW_PREFIX,
     CB_ADMIN_EVENT_CUSTOM_PRICE,
     CB_ADMIN_EVENT_PRICE_PREFIX,
+    CB_ADMIN_EVENT_TYPE_PREFIX,
     CB_ADMIN_EVENT_SKIP_LOCATION,
     CB_ADMIN_EVENT_SKIP_NOTE,
 )
@@ -36,6 +38,7 @@ from db.engine import Session
 from db import repo
 from db.models import GAME_CLOSED, GAME_CANCELLED
 from event_price import format_event_price, parse_event_price
+from event_types import EVENT_TYPE_LABELS
 from gametime import as_utc, parse_local, fmt
 from handlers.games import game_card_payload
 from keyboards.admin import (
@@ -50,8 +53,11 @@ from keyboards.admin import (
     event_location_keyboard,
     event_note_keyboard,
     event_price_keyboard,
+    event_type_keyboard,
 )
 from keyboards.menu import GREETING, main_menu_keyboard
+
+logger = logging.getLogger(__name__)
 
 
 (
@@ -62,17 +68,20 @@ from keyboards.menu import GREETING, main_menu_keyboard
     EVENT_LOCATION,
     EVENT_NOTE,
     EVENT_CONFIRM,
-) = range(7)
+    EVENT_TYPE,
+) = range(8)
 
 EVENT_EDIT_MENU, EVENT_EDIT_VALUE = range(2)
 
 _EVENT_TITLE = "admin_event_title"
+_EVENT_TYPE = "admin_event_type"
 _EVENT_STARTS_AT = "admin_event_starts_at"
 _EVENT_CAPACITY = "admin_event_capacity"
 _EVENT_PRICE = "admin_event_price"
 _EVENT_LOCATION = "admin_event_location"
 _EVENT_NOTE = "admin_event_note"
 _EVENT_KEYS = (
+    _EVENT_TYPE,
     _EVENT_TITLE,
     _EVENT_STARTS_AT,
     _EVENT_CAPACITY,
@@ -138,6 +147,7 @@ def _confirmation_text(context: ContextTypes.DEFAULT_TYPE) -> str:
         "Проверьте встречу перед созданием:",
         "",
         f"🎲 <b>{title}</b>",
+        f"🏷 Вид: <b>{EVENT_TYPE_LABELS[context.user_data[_EVENT_TYPE]]}</b>",
         f"📅 {fmt(starts_at)}",
         f"👥 Мест: <b>{capacity}</b>",
         f"💳 Стоимость: <b>{format_event_price(price)}</b>",
@@ -156,6 +166,30 @@ async def on_create_event(
     query = update.callback_query
     await query.answer()
     _clear_event_draft(context)
+    await query.edit_message_text(
+        "Выберите вид мероприятия.\n\n"
+        "Для мафии запись закрывается за 2 суток до начала, "
+        "для остальных мероприятий — в момент начала.",
+        reply_markup=event_type_keyboard(),
+    )
+    return EVENT_TYPE
+
+
+async def on_event_type(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    event_type = query.data[len(CB_ADMIN_EVENT_TYPE_PREFIX):]
+    if event_type not in EVENT_TYPE_LABELS:
+        await query.edit_message_text(
+            "Выберите вид мероприятия из списка.",
+            reply_markup=event_type_keyboard(),
+        )
+        return EVENT_TYPE
+    context.user_data[_EVENT_TYPE] = event_type
     await query.edit_message_text(
         "Как будет называться игровая встреча?\n\n"
         "Отправьте название сообщением.",
@@ -404,6 +438,7 @@ async def on_confirm_event(
             note=context.user_data[_EVENT_NOTE],
             host_id=host.id,
             title=context.user_data[_EVENT_TITLE],
+            event_type=context.user_data[_EVENT_TYPE],
         )
         event_id = event.id
         event_title = event.title
@@ -500,6 +535,7 @@ def _event_edit_text(event) -> str:
     return (
         "✏️ <b>Изменение встречи</b>\n\n"
         f"🎲 {escape(event.title)}\n"
+        f"🏷 Вид: {EVENT_TYPE_LABELS[event.event_type]}\n"
         f"📅 {fmt(event.starts_at)}\n"
         f"👥 Мест: {capacity}\n"
         f"💳 Стоимость: {format_event_price(event.price_rubles)}\n"
@@ -544,6 +580,7 @@ async def on_edit_event_field(
     event_id = context.user_data.get(_EDIT_EVENT_ID)
     field = query.data[len(CB_ADMIN_EVENT_EDIT_FIELD_PREFIX):]
     prompts = {
+        "event_type": "Выберите новый вид мероприятия.",
         "title": "Введите новое название встречи.",
         "starts_at": (
             "Введите новую дату и время в формате "
@@ -560,6 +597,14 @@ async def on_edit_event_field(
         await query.edit_message_text("Не удалось открыть редактор.")
         return ConversationHandler.END
     context.user_data[_EDIT_FIELD] = field
+    if field == "event_type":
+        await query.edit_message_text(
+            prompts[field],
+            reply_markup=event_type_keyboard(
+                cancel_callback=f"{CB_ADMIN_EVENT_EDIT_PREFIX}{event_id}"
+            ),
+        )
+        return EVENT_EDIT_VALUE
     if field == "price_rubles":
         await query.edit_message_text(
             prompts[field],
@@ -576,6 +621,40 @@ async def on_edit_event_field(
         ),
     )
     return EVENT_EDIT_VALUE
+
+
+async def on_edit_event_type_choice(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    if await _deny_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    event_id = context.user_data.get(_EDIT_EVENT_ID)
+    event_type = query.data[len(CB_ADMIN_EVENT_TYPE_PREFIX):]
+    if (
+        event_id is None
+        or context.user_data.get(_EDIT_FIELD) != "event_type"
+        or event_type not in EVENT_TYPE_LABELS
+    ):
+        await query.edit_message_text("Не удалось изменить вид мероприятия.")
+        return ConversationHandler.END
+
+    async with Session() as session:
+        event = await repo.get_game(session, event_id)
+        if event is None:
+            await query.edit_message_text("Встреча не найдена.")
+            return ConversationHandler.END
+        event.event_type = event_type
+        await session.commit()
+
+    context.user_data.pop(_EDIT_FIELD, None)
+    await query.edit_message_text(
+        "✅ Изменения сохранены.\n\n" + _event_edit_text(event),
+        parse_mode="HTML",
+        reply_markup=event_edit_fields_keyboard(event.id),
+    )
+    return EVENT_EDIT_MENU
 
 
 async def on_edit_event_price_choice(
@@ -646,6 +725,15 @@ async def on_edit_event_value(
     if event_id is None or field is None:
         await update.message.reply_text("Черновик изменения устарел.")
         return ConversationHandler.END
+
+    if field == "event_type":
+        await update.message.reply_text(
+            "Выберите вид мероприятия кнопкой.",
+            reply_markup=event_type_keyboard(
+                cancel_callback=f"{CB_ADMIN_EVENT_EDIT_PREFIX}{event_id}"
+            ),
+        )
+        return EVENT_EDIT_VALUE
 
     raw = " ".join(update.message.text.split())
     can_clear = field in ("location", "note")
@@ -865,7 +953,9 @@ async def on_delete_event_confirm(
                 f"⚠️ Встреча «{event_title}» ({event_when}) удалена.",
             )
         except Exception:
-            pass
+            logger.exception("notification.event_deleted.failed", extra={"fields": {
+                "recipient_id": tg_id, "event_id": event_id,
+            }})
 
 
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -996,7 +1086,9 @@ async def _set_status_and_notify(update, context, status: str, verb: str) -> Non
             try:
                 await context.bot.send_message(tg_id, f"⚠️ Игра {when} отменена.")
             except Exception:
-                pass
+                logger.exception("notification.game_cancelled.failed", extra={"fields": {
+                    "recipient_id": tg_id, "game_id": game_id,
+                }})
 
 
 @admin_only
@@ -1018,6 +1110,12 @@ def register(app) -> None:
             ),
         ],
         states={
+            EVENT_TYPE: [
+                CallbackQueryHandler(
+                    on_event_type,
+                    pattern=f"^{CB_ADMIN_EVENT_TYPE_PREFIX}",
+                ),
+            ],
             EVENT_TITLE: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
@@ -1104,6 +1202,10 @@ def register(app) -> None:
                 ),
             ],
             EVENT_EDIT_VALUE: [
+                CallbackQueryHandler(
+                    on_edit_event_type_choice,
+                    pattern=f"^{CB_ADMIN_EVENT_TYPE_PREFIX}",
+                ),
                 CallbackQueryHandler(
                     on_edit_event_price_choice,
                     pattern=f"^{CB_ADMIN_EVENT_PRICE_PREFIX}",

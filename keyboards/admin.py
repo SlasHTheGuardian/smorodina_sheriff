@@ -12,12 +12,14 @@ from constants import (
     CB_ADMIN_EVENT_CONFIRM,
     CB_ADMIN_EVENT_CUSTOM_PRICE,
     CB_ADMIN_EVENT_PRICE_PREFIX,
+    CB_ADMIN_EVENT_TYPE_PREFIX,
     CB_ADMIN_EVENT_SKIP_LOCATION,
     CB_ADMIN_EVENT_SKIP_NOTE,
     CB_GAME_PREFIX,
     CB_MAIN,
 )
 from db.models import Game
+from event_types import EVENT_TYPE_LABELS
 from gametime import fmt
 
 
@@ -56,6 +58,10 @@ def admin_event_detail_keyboard(event_id: int) -> InlineKeyboardMarkup:
 
 def event_edit_fields_keyboard(event_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "Вид мероприятия",
+            callback_data=f"{CB_ADMIN_EVENT_EDIT_FIELD_PREFIX}event_type",
+        )],
         [
             InlineKeyboardButton(
                 "Название",
@@ -139,6 +145,19 @@ def event_creation_cancel_keyboard() -> InlineKeyboardMarkup:
             "Отмена", callback_data=CB_ADMIN_EVENT_CANCEL
         ),
     ]])
+
+
+def event_type_keyboard(
+    cancel_callback: str = CB_ADMIN_EVENT_CANCEL,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            label, callback_data=f"{CB_ADMIN_EVENT_TYPE_PREFIX}{event_type}"
+        )]
+        for event_type, label in EVENT_TYPE_LABELS.items()
+    ]
+    rows.append([InlineKeyboardButton("Отмена", callback_data=cancel_callback)])
+    return InlineKeyboardMarkup(rows)
 
 
 def event_price_keyboard(

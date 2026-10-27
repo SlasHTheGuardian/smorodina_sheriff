@@ -4,7 +4,8 @@
 .venv/
 __pycache__/
 sheriff.db
-tests/
+tests/*
+!tests/test_observability.py
 .env
 .env.*
 !.env.example
@@ -16,3 +17,5 @@ docker/
 db_schema.sql
 .env.example
 .gitattributes
+tests
+DB_INTERACTION.html

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from urllib.parse import quote
 
 import httpx
 
 from config import RATINGS_API_BASE_URL, RATINGS_API_TIMEOUT
+from observability import observed
+
+logger = logging.getLogger(__name__)
 
 
 class RatingsServiceError(Exception):
@@ -115,6 +119,7 @@ def parse_player_rating(payload: object) -> PlayerRating:
     )
 
 
+@observed
 async def fetch_player_rating(
     player_name: str,
     client: httpx.AsyncClient | None = None,
@@ -127,6 +132,7 @@ async def fetch_player_rating(
 
     try:
         response = await client.get(url)
+        logger.info("ratings.response", extra={"fields": {"status_code": response.status_code}})
         if response.status_code == 404:
             return None
         response.raise_for_status()

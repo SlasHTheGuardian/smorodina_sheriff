@@ -1,4 +1,5 @@
 from html import escape
+import logging
 
 from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler
@@ -17,7 +18,10 @@ from db.engine import Session
 from db import repo
 from db.models import GAME_OPEN, REG_ACTIVE, REG_WAITLIST
 from event_price import format_event_price
+from event_types import EVENT_TYPE_LABELS, EVENT_TYPE_MAFIA
 from gametime import fmt
+
+logger = logging.getLogger(__name__)
 
 
 def _player_from_update(update: Update):
@@ -29,6 +33,14 @@ def _player_from_update(update: Update):
 # ---------------------------------------------------------------------------
 # Рендер карточки игры
 # ---------------------------------------------------------------------------
+
+def _registration_closed_text(game) -> str:
+    if game.status != GAME_OPEN:
+        return "Запись на это мероприятие закрыта."
+    if game.event_type == EVENT_TYPE_MAFIA:
+        return "Запись на мафию закрывается за 2 суток до начала."
+    return "Мероприятие уже началось. Запись закрыта."
+
 
 async def game_card_payload(
     session,
@@ -43,6 +55,7 @@ async def game_card_payload(
 
     lines = [
         f"🎲 <b>{escape(game.title)}</b>",
+        f"🏷 Вид: <b>{EVENT_TYPE_LABELS[game.event_type]}</b>",
         f"📅 {fmt(game.starts_at)}",
         f"💳 Стоимость: <b>{format_event_price(game.price_rubles)}</b>",
     ]
@@ -57,8 +70,7 @@ async def game_card_payload(
         lines.append("")
     elif not repo.registration_is_open(game):
         lines.append(
-            "👁 <i>Только просмотр. Запись закрывается "
-            "за 2 суток до начала.</i>"
+            f"👁 <i>Только просмотр. {_registration_closed_text(game)}</i>"
         )
         lines.append("")
     capacity = game.capacity if game.capacity is not None else "∞"
@@ -179,7 +191,7 @@ async def on_register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         if not repo.registration_is_open(game):
             await query.answer(
-                "Запись закрывается за 2 суток до начала.",
+                _registration_closed_text(game),
                 show_alert=False,
             )
             text, kb = await game_card_payload(session, game, player)
@@ -226,7 +238,7 @@ async def on_payment_confirm(
         code, status = await repo.register(session, game, player)
         toast = {
             "closed":  "Запись на эту игру закрыта.",
-            "deadline": "Запись закрывается за 2 суток до начала.",
+            "deadline": _registration_closed_text(game),
             "already": "Вы уже записаны.",
         }.get(code) or (
             "Готово, вы записаны!" if status == REG_ACTIVE
@@ -295,7 +307,9 @@ async def on_cancel_confirm(
                 f"🎉 Освободилось место на игру {game_when} — вы записаны!",
             )
         except Exception:
-            pass
+            logger.exception("notification.waitlist_promotion.failed", extra={"fields": {
+                "recipient_id": promoted_tg, "game_id": game_id,
+            }})
 
 
 def register(app) -> None:

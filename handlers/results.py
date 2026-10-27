@@ -851,9 +851,8 @@ async def _rating_payload(player: Player) -> str:
         rating = await fetch_player_rating(nickname)
     except RatingsServiceError:
         logger.warning(
-            "Не удалось получить рейтинг для игрового ника %r",
-            nickname,
-            exc_info=True,
+            "ratings.unavailable",
+            extra={"fields": {"player_id": player.id}},
         )
         return (
             header

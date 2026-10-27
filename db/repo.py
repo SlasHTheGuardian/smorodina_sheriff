@@ -8,11 +8,14 @@
 
 from __future__ import annotations
 from collections import Counter
+from observability import observed
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+from event_types import EVENT_TYPE_LABELS, EVENT_TYPE_MAFIA
 
 from db.models import (
     Player, Game, Registration, PlayedGame, GamePlayer, Role,
@@ -38,9 +41,15 @@ def registration_is_open(
 ) -> bool:
     current = _as_utc(now or _utcnow())
     starts_at = _as_utc(game.starts_at)
+    # До flush() SQLAlchemy ещё не проставляет default новому ORM-объекту.
+    event_type = game.event_type or EVENT_TYPE_MAFIA
+    close_before = (
+        REGISTRATION_CLOSE_BEFORE
+        if event_type == EVENT_TYPE_MAFIA else timedelta(0)
+    )
     return (
         game.status == GAME_OPEN
-        and starts_at > current + REGISTRATION_CLOSE_BEFORE
+        and starts_at > current + close_before
     )
 
 
@@ -48,6 +57,7 @@ def registration_is_open(
 # Игроки
 # ---------------------------------------------------------------------------
 
+@observed
 async def get_or_create_player(
     session: AsyncSession, tg_id: int, username: str | None, full_name: str
 ) -> Player:
@@ -63,6 +73,7 @@ async def get_or_create_player(
     return player
 
 
+@observed
 async def set_game_nickname(
     session: AsyncSession, player: Player, nickname: str
 ) -> None:
@@ -74,12 +85,16 @@ async def set_game_nickname(
 # Игры
 # ---------------------------------------------------------------------------
 
+@observed
 async def create_game(
     session: AsyncSession, starts_at: datetime, capacity: int,
     location: str | None, note: str | None, host_id: int | None,
     title: str = "Игровой вечер",
     price_rubles: int = 500,
+    event_type: str = EVENT_TYPE_MAFIA,
 ) -> Game:
+    if event_type not in EVENT_TYPE_LABELS:
+        raise ValueError("Неизвестный вид мероприятия")
     game = Game(
         starts_at=starts_at,
         capacity=capacity,
@@ -88,6 +103,7 @@ async def create_game(
         note=note,
         host_id=host_id,
         title=title,
+        event_type=event_type,
         status=GAME_OPEN,
     )
     session.add(game)
@@ -95,15 +111,18 @@ async def create_game(
     return game
 
 
+@observed
 async def get_game(session: AsyncSession, game_id: int) -> Game | None:
     return await session.get(Game, game_id)
 
 
+@observed
 async def set_game_status(session: AsyncSession, game: Game, status: str) -> None:
     game.status = status
     await session.commit()
 
 
+@observed
 async def delete_event(session: AsyncSession, event_id: int) -> bool:
     """Удаляет встречу, регистрации и все связанные результаты."""
     played_game_ids = select(PlayedGame.id).where(
@@ -127,6 +146,7 @@ async def delete_event(session: AsyncSession, event_id: int) -> bool:
     return bool(result.rowcount)
 
 
+@observed
 async def list_upcoming_games(session: AsyncSession) -> list[Game]:
     """Предстоящие встречи для записи или просмотра состава."""
     stmt = (
@@ -140,6 +160,7 @@ async def list_upcoming_games(session: AsyncSession) -> list[Game]:
     return list(await session.scalars(stmt))
 
 
+@observed
 async def counts_for_games(
     session: AsyncSession, game_ids: list[int]
 ) -> dict[int, tuple[int, int]]:
@@ -164,6 +185,7 @@ async def counts_for_games(
     return out
 
 
+@observed
 async def active_count(session: AsyncSession, game_id: int) -> int:
     return await session.scalar(
         select(func.count()).select_from(Registration).where(
@@ -172,6 +194,7 @@ async def active_count(session: AsyncSession, game_id: int) -> int:
     ) or 0
 
 
+@observed
 async def roster(
     session: AsyncSession, game_id: int
 ) -> tuple[list[Registration], list[Registration]]:
@@ -195,6 +218,7 @@ async def roster(
 # Записи
 # ---------------------------------------------------------------------------
 
+@observed
 async def get_registration(
     session: AsyncSession, game_id: int, player_id: int
 ) -> Registration | None:
@@ -206,13 +230,15 @@ async def get_registration(
     )
 
 
+@observed
 async def register(
     session: AsyncSession, game: Game, player: Player
 ) -> tuple[str, str | None]:
     """
     Возвращает (code, status):
       ('closed',     None)            — игра закрыта/отменена;
-      ('deadline',   None)            — до начала осталось не более 2 суток;
+      ('deadline',   None)            — срок записи истёк (за 2 суток для мафии,
+                                        в момент начала для остальных видов);
       ('already',    REG_ACTIVE|REG_WAITLIST) — уже записан;
       ('registered', REG_ACTIVE|REG_WAITLIST) — записали (или в лист ожидания).
     """
@@ -240,6 +266,7 @@ async def register(
     return ("registered", new_status)
 
 
+@observed
 async def cancel_registration(
     session: AsyncSession, game: Game, player: Player
 ) -> tuple[str, Player | None]:
@@ -275,6 +302,7 @@ async def cancel_registration(
     return ("cancelled", promoted)
 
 
+@observed
 async def list_player_games(
     session: AsyncSession, player: Player
 ) -> list[Registration]:
@@ -298,6 +326,7 @@ async def list_player_games(
 # Результаты игровых вечеров
 # ---------------------------------------------------------------------------
 
+@observed
 async def list_recent_events(
     session: AsyncSession, days: int = 30
 ) -> list[Game]:
@@ -315,6 +344,7 @@ async def list_recent_events(
     return list(await session.scalars(stmt))
 
 
+@observed
 async def list_event_participants(
     session: AsyncSession, event_id: int
 ) -> list[Registration]:
@@ -331,6 +361,7 @@ async def list_event_participants(
     return list(await session.scalars(stmt))
 
 
+@observed
 async def list_event_played_games(
     session: AsyncSession, event_id: int
 ) -> list[PlayedGame]:
@@ -342,6 +373,7 @@ async def list_event_played_games(
     return list(await session.scalars(stmt))
 
 
+@observed
 async def create_event_played_games(
     session: AsyncSession, event: Game, count: int, host_id: int | None
 ) -> list[PlayedGame]:
@@ -361,6 +393,7 @@ async def create_event_played_games(
     return await list_event_played_games(session, event.id)
 
 
+@observed
 async def add_event_played_game(
     session: AsyncSession, event: Game, host_id: int | None
 ) -> PlayedGame:
@@ -380,6 +413,7 @@ async def add_event_played_game(
     return game
 
 
+@observed
 async def delete_played_game(
     session: AsyncSession, played_game_id: int
 ) -> int | None:
@@ -398,12 +432,14 @@ async def delete_played_game(
     return event_id
 
 
+@observed
 async def get_played_game(
     session: AsyncSession, played_game_id: int
 ) -> PlayedGame | None:
     return await session.get(PlayedGame, played_game_id)
 
 
+@observed
 async def game_assignments(
     session: AsyncSession, played_game_id: int
 ) -> list[GamePlayer]:
@@ -419,6 +455,7 @@ async def game_assignments(
     return list(await session.scalars(stmt))
 
 
+@observed
 async def role_limit_error(
     session: AsyncSession,
     played_game_id: int,
@@ -475,6 +512,7 @@ async def role_limit_error(
     )
 
 
+@observed
 async def assign_game_player(
     session: AsyncSession,
     game: PlayedGame,
@@ -534,6 +572,7 @@ async def assign_game_player(
     return ("saved", assignment)
 
 
+@observed
 async def clear_game_player_assignment(
     session: AsyncSession, game_id: int, user_id: int
 ) -> None:
@@ -550,6 +589,7 @@ async def clear_game_player_assignment(
         await session.commit()
 
 
+@observed
 async def toggle_game_skip(
     session: AsyncSession, game: PlayedGame, user_id: int
 ) -> bool:
@@ -571,6 +611,7 @@ async def toggle_game_skip(
     return code == "saved"
 
 
+@observed
 async def set_game_host(
     session: AsyncSession, game: PlayedGame, user_id: int
 ) -> bool:
@@ -609,6 +650,7 @@ def _is_role_winner(
     return role_side == winner_side
 
 
+@observed
 async def validate_game_setup(
     session: AsyncSession, game: PlayedGame
 ) -> tuple[bool, str]:
@@ -641,6 +683,7 @@ async def validate_game_setup(
     return (True, "")
 
 
+@observed
 async def set_game_winner(
     session: AsyncSession, game: PlayedGame, winner_side: str
 ) -> tuple[bool, str]:
@@ -670,6 +713,7 @@ async def set_game_winner(
     return (True, "")
 
 
+@observed
 async def add_guest_to_event(
     session: AsyncSession, event_id: int, nickname: str
 ) -> Player:
@@ -690,6 +734,7 @@ async def add_guest_to_event(
     return guest
 
 
+@observed
 async def list_user_result_games(
     session: AsyncSession, user_id: int, days: int = 30
 ) -> list[tuple[PlayedGame, GamePlayer, Game, Role]]:

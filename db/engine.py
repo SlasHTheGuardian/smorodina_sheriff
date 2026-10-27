@@ -6,8 +6,11 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 
 from config import DATABASE_URL
 from db.models import Base, Role
+from db.logging import install_database_logging
+from observability import observed, operation
 
-engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_async_engine(DATABASE_URL, pool_pre_ping=True, hide_parameters=True)
+install_database_logging(engine)
 
 Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -73,6 +76,13 @@ def _add_compatible_columns(sync_conn) -> None:
         columns = {
             column["name"] for column in inspector.get_columns("events")
         }
+        if "event_type" not in columns:
+            sync_conn.execute(text(
+                "ALTER TABLE events ADD COLUMN event_type "
+                "VARCHAR(32) NOT NULL DEFAULT 'mafia' "
+                "CONSTRAINT ck_events_event_type CHECK "
+                "(event_type IN ('mafia','board_games','online_meeting','meetup'))"
+            ))
         if "price_rubles" not in columns:
             sync_conn.execute(text(
                 "ALTER TABLE events ADD COLUMN price_rubles "
@@ -101,15 +111,21 @@ def _seed_roles(sync_conn) -> None:
             )
 
 
+@observed
 async def init_models() -> None:
     """Создаёт/дополняет схему и обязательный справочник ролей."""
     async with engine.begin() as conn:
-        await conn.run_sync(_prepare_legacy_sqlite)
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_ensure_indexes)
-        await conn.run_sync(_add_compatible_columns)
-        await conn.run_sync(_seed_roles)
+        for name, step in (
+            ("prepare_legacy_sqlite", _prepare_legacy_sqlite),
+            ("create_tables", Base.metadata.create_all),
+            ("ensure_indexes", _ensure_indexes),
+            ("add_compatible_columns", _add_compatible_columns),
+            ("seed_roles", _seed_roles),
+        ):
+            with operation(f"db.schema.{name}"):
+                await conn.run_sync(step)
 
 
+@observed
 async def dispose() -> None:
     await engine.dispose()
