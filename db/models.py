@@ -27,7 +27,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from event_types import EVENT_TYPE_MAFIA
+from event_types import EVENT_TYPE_CHECK_SQL, EVENT_TYPE_MAFIA
 
 
 def _utcnow() -> datetime:
@@ -161,7 +161,7 @@ class Game(Base):
             name="ck_events_price_rubles",
         ),
         CheckConstraint(
-            "event_type IN ('mafia','board_games','online_meeting','meetup')",
+            EVENT_TYPE_CHECK_SQL,
             name="ck_events_event_type",
         ),
         Index("idx_events_host", "host_id"),

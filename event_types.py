@@ -7,4 +7,9 @@ EVENT_TYPE_LABELS = {
     "board_games": "Настолки",
     "online_meeting": "Онлайн-встреча",
     "meetup": "Сходка",
+    "other": "Другое",
 }
+
+EVENT_TYPE_CHECK_SQL = (
+    "event_type IN (" + ",".join(f"'{code}'" for code in EVENT_TYPE_LABELS) + ")"
+)
